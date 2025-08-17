@@ -37,9 +37,9 @@ class Server
     private $icpSocket;
 
     /**
-     * @var string $ipcSocketPath
+     * @var null|string $ipcSocketPath
      */
-    private string $ipcSocketPath;
+    private ?string $ipcSocketPath;
 
     /**
      * @var string $ipcOwner If set, owner of the ipc socket will be changed to this value.
@@ -114,12 +114,12 @@ class Server
     /**
      * @param string $host
      * @param int $port
-     * @param string $ipcSocketPath
+     * @param null|string $ipcSocketPath
      */
     public function __construct(
         string $host = 'localhost',
         int $port = 8000,
-        string $ipcSocketPath = '/tmp/phpwss.sock'
+        ?string $ipcSocketPath = '/tmp/phpwss.sock'
     ) {
         $this->host = $host;
         $this->port = $port;
@@ -137,12 +137,14 @@ class Server
     {
         ob_implicit_flush();
         $this->createSocket($this->host, $this->port);
-        $this->openIPCSocket($this->ipcSocketPath);
+        if ($this->ipcSocketPath) {
+            $this->openIPCSocket($this->ipcSocketPath);
+        }
         $this->log('Server created');
 
         while (true) {
             $this->timers->runAll();
-          
+
             $changed_sockets = $this->allsockets;
             @stream_select($changed_sockets, $write, $except, 0, 5000);
             foreach ($changed_sockets as $socket) {
@@ -598,10 +600,15 @@ class Server
      */
     private function openIPCSocket(string $ipcSocketPath): void
     {
-        if (file_exists($ipcSocketPath)) {
-            unlink($ipcSocketPath);
-        }
-        $this->icpSocket = socket_create(AF_UNIX, SOCK_DGRAM, 0);
+		if (substr(php_uname(), 0, 7) == "Windows"){
+			$this->icpSocket = socket_create(AF_INET, SOCK_DGRAM, 0);
+			$ipcSocketPath = $this->host;
+		} else {
+			if (file_exists($ipcSocketPath)) {
+				unlink($ipcSocketPath);
+			}
+			$this->icpSocket = socket_create(AF_UNIX, SOCK_DGRAM, 0);
+		}
         if ($this->icpSocket === false) {
             throw new \RuntimeException('Could not open ipc socket.');
         }
@@ -630,7 +637,13 @@ class Server
     private function handleIPC(): void
     {
         $buffer = '';
-        $bytesReceived = socket_recvfrom($this->icpSocket, $buffer, 65536, 0, $this->ipcSocketPath);
+		if (substr(php_uname(), 0, 7) == "Windows") {
+			$from = '';
+			$port = 0;
+			$bytesReceived = socket_recvfrom($this->icpSocket, $buffer, 65536, 0, $from, $port);
+		} else {
+			$bytesReceived = socket_recvfrom($this->icpSocket, $buffer, 65536, 0, $this->ipcSocketPath);
+		}
         if ($bytesReceived === false) {
             return;
         }
